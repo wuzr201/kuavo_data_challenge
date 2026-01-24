@@ -32,6 +32,7 @@ from lerobot.datasets.lerobot_dataset import HF_LEROBOT_HOME as LEROBOT_HOME
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 import dataclasses
 from kuavo_data.common import kuavo_dataset as kuavo
+from kuavo_data.common.config_platform import get_arm_joint_slice, get_arm_head_start, DEFAULT_PLATFORM
 from rich.logging import RichHandler
 import logging
 
@@ -249,7 +250,9 @@ def populate_dataset_chunked(
                 arm_traj_alt = get_array("action.kuavo_arm_traj_alt", np.float32)
                 if arm_traj_alt.size == 0 and arm_traj.size == 0:
                     return
-                action[12:26] = arm_traj_alt if arm_traj_alt.size else arm_traj
+                # 使用硬件常量获取索引范围，便于适配不同硬件（4Pro/5W）
+                arm_start, arm_end = get_arm_joint_slice(DEFAULT_PLATFORM)
+                action[arm_start:arm_end] = arm_traj_alt if arm_traj_alt.size else arm_traj
                 
                 # 接口留用
                 velocity = None
@@ -536,7 +539,8 @@ def main(cfg: DictConfig):
     half_arm = len(kuavo.DEFAULT_ARM_JOINT_NAMES) // 2
     half_claw = len(kuavo.DEFAULT_LEJUCLAW_JOINT_NAMES) // 2
     half_dexhand = len(kuavo.DEFAULT_DEXHAND_JOINT_NAMES) // 2
-    UP_START_INDEX = 12
+    # 使用硬件常量获取手臂起始索引，便于适配不同硬件（4Pro/5W）
+    UP_START_INDEX = get_arm_head_start(DEFAULT_PLATFORM)
     # if kuavo.ONLY_HALF_UP_BODY:
     if kuavo.USE_LEJU_CLAW:
         DEFAULT_ARM_JOINT_NAMES = kuavo.DEFAULT_ARM_JOINT_NAMES[:half_arm] + kuavo.DEFAULT_LEJUCLAW_JOINT_NAMES[:half_claw] \

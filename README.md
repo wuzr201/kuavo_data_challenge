@@ -308,6 +308,27 @@ git submodule update --recursive --progress
 
 使用 conda （推荐）或 python venv 创建虚拟环境（推荐 python 3.10）：
 
+#### Simplified:
+```BASH
+conda create -n kdc python=3.10
+conda activate kdc
+pip install lerobot==0.4.2
+pip install antlr4-python3-runtime==4.9.3
+pip install -e .
+ 
+################################################################
+# if encounter following issue:
+# File "/home/miniconda3/envs/kdc/lib/python3.10/site-packages/torch/__init__.py", line 409, in <module>
+# from torch._C import *  # noqa: F403
+
+# try this:
+conda install -c conda-forge cudnn nccl
+#################################################################
+
+```
+
+#### Full:
+
 ⚠️ 注意，本分支请新建一个独立于master分支的环境！例如: kdc_dev
 
 - ananconda配置：

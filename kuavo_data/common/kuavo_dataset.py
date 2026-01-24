@@ -9,6 +9,7 @@ import os
 import glob
 from collections import defaultdict
 from typing import Callable, Optional
+from .config_platform import get_arm_joint_slice, get_arm_head_start, DEFAULT_PLATFORM
 
 # ================ 机器人关节信息定义 ================
 
@@ -280,31 +281,36 @@ class KuavoMsgProcesser:
             msg: The input message containing joint state information.
 
         Returns:
-            dict: A dictionary with processed joint state data. The 'data' field is sliced to include only indices 12 through 25.
+            dict: A dictionary with processed joint state data. The 'data' field is sliced to include only arm joint indices.
 
         Notes:
             This function uses KuavoMsgProcesser.process_joint_state to initially process the input message and then extracts the specific range of data for further use.
+            Uses hardware constants to support different hardware types (4Pro/5W).
         """
         res = KuavoMsgProcesser.process_joint_state(msg)
-        res["data"] = res["data"][12:26]
+        arm_start, arm_end = get_arm_joint_slice(DEFAULT_PLATFORM)
+        res["data"] = res["data"][arm_start:arm_end]
         return res
 
     @staticmethod
     def process_joint_cmd_extract_arm(msg):
         res = KuavoMsgProcesser.process_joint_cmd(msg)
-        res["data"] = res["data"][12:26]
+        arm_start, arm_end = get_arm_joint_slice(DEFAULT_PLATFORM)
+        res["data"] = res["data"][arm_start:arm_end]
         return res
 
     @staticmethod
     def process_sensors_data_raw_extract_arm_head(msg):
         res = KuavoMsgProcesser.process_joint_state(msg)
-        res["data"] = res["data"][12:]
+        arm_head_start = get_arm_head_start(DEFAULT_PLATFORM)
+        res["data"] = res["data"][arm_head_start:]
         return res
 
     @staticmethod
     def process_joint_cmd_extract_arm_head(msg):
         res = KuavoMsgProcesser.process_joint_cmd(msg)
-        res["data"] = res["data"][12:]
+        arm_head_start = get_arm_head_start(DEFAULT_PLATFORM)
+        res["data"] = res["data"][arm_head_start:]
         return res
 
 
@@ -375,17 +381,20 @@ class KuavoRosbagReader:
             #     }
             if 'wrist_cam_l' in camera:
                 self._topic_process_map[f"{camera}"] = {
-                    "topic": "/cam_l/color/image_raw/compressed",   ### ATT: 这里的cam_r是因为在2025年7月8日的rosbag中，cam_r是左手腕相机
+                    # "topic": "/cam_l/color/image_raw/compressed",   ### ATT: 这里的cam_r是因为在2025年7月8日的rosbag中，cam_r是左手腕相机
+                    "topic": "/left_cam/color/image_raw",
                     "msg_process_fn": self._msg_processer.process_color_image,
                 }
             elif 'wrist_cam_r' in camera:
                 self._topic_process_map[f"{camera}"] = {
-                    "topic": "/cam_r/color/image_raw/compressed",
+                    # "topic": "/cam_r/color/image_raw/compressed",
+                    "topic": "/right_cam/color/image_raw",
                     "msg_process_fn": self._msg_processer.process_color_image,
                 }
             elif 'head_cam_h' in camera:
                 self._topic_process_map[f"{camera}"] = {
-                    "topic": "/cam_h/color/image_raw/compressed",
+                    # "topic": "/cam_h/color/image_raw/compressed",
+                    "topic": "/camera/color/image_raw",
                     "msg_process_fn": self._msg_processer.process_color_image,
             }
             elif 'head_cam_l' in camera:
@@ -413,7 +422,6 @@ class KuavoRosbagReader:
                 "topic": f"/cam_r/depth/image_rect_raw/compressedDepth",
                 "msg_process_fn": self._msg_processer.process_depth_image, 
                 }
-
 
 
     def load_raw_rosbag(self, bag_file: str):

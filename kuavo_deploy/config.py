@@ -12,6 +12,7 @@ from dataclasses import dataclass, field, asdict
 from typing import List, Optional, Tuple, Any, Dict
 import os
 import yaml
+from kuavo_data.common.config_platform import get_arm_joint_slice, DEFAULT_PLATFORM
 
 
 @dataclass
@@ -60,6 +61,7 @@ class ConfigEnv:
     ratio: float = 0.5
     frame_alignment: bool = True
     qiangnao_dof_needed: int = 1
+    platform_type: str = DEFAULT_PLATFORM  # 硬件类型：'4pro' 或 '5w'，默认使用 DEFAULT_PLATFORM
 
     fk_joint_angles_for_reset: Optional[List[float]] = None
     rotation_threshold: Optional[float] = None
@@ -85,10 +87,20 @@ class ConfigEnv:
     # -------- Derived properties ----------
     @property
     def joint_q_slice(self):
+        """Get joint slice based on which arm and hardware type.
+        
+        使用硬件常量自动适配不同硬件类型（4Pro/5W）。
+        """
+        # 获取手臂关节索引范围
+        arm_start, arm_end = get_arm_joint_slice(self.platform_type)
+        # 计算左右手臂的分界点（每只手臂7个关节）
+        left_end = arm_start + 7
+        right_start = left_end
+        
         return {
-            "left": [[12, 19]],
-            "right": [[19, 26]],
-            "both": [[12, 19], [19, 26]]
+            "left": [[arm_start, left_end]],
+            "right": [[right_start, arm_end]],
+            "both": [[arm_start, left_end], [right_start, arm_end]]
         }[self.which_arm]
 
     @property

@@ -15,6 +15,7 @@ from kuavo_humanoid_sdk.msg.kuavo_msgs.msg import sensorsData,lejuClawState
 from kuavo_deploy.utils.signal_controller import ControlSignalManager
 from kuavo_deploy.utils.logging_utils import setup_logger
 from kuavo_deploy.utils.ros_manager import ROSManager
+from kuavo_data.common.config_platform import get_arm_joint_slice, DEFAULT_PLATFORM
 
 
 log_robot = setup_logger("robot")
@@ -146,9 +147,12 @@ class ObsBuffer:
         joint = msg.joint_data.joint_q
         timestamp = msg.header.stamp.to_sec()
 
-        # FK 计算需要双臂的14个关节（索引12-26）
+        # FK 计算需要双臂的14个关节
         # 计算依赖于此数据源的观测（例如 eef_pose）
-        arm_joints = joint[12:26]  # 提取双臂关节
+        # 使用硬件常量获取索引范围，便于适配不同硬件（4Pro/5W）
+        arm_start, arm_end = get_arm_joint_slice(DEFAULT_PLATFORM)
+        arm_joints = joint[arm_start:arm_end]  # 提取双臂关节
+
         self.compute_dependent_obs(key, arm_joints, timestamp)
 
         slice_value = handle.get("params", {}).get("slice", None)  
