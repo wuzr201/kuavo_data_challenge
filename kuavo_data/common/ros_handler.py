@@ -5,8 +5,7 @@ from multiprocessing import Process, Queue
 import time
 import json
 
-from geometry_msgs.msg import PoseStamped
-from sensor_msgs.msg import Image, CompressedImage
+from sensor_msgs.msg import CompressedImage
 from kuavo_msgs.msg import sensorsData, jointCmd
 from rospy_message_converter import message_converter
 

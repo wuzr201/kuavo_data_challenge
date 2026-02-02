@@ -375,7 +375,7 @@ class ArmMove:
         start_angles = np.array(start_angles)/180*np.pi
         self._move_to_joint_angles(start_angles)
         # 播放轨迹
-        self.play_bag(go_bag=self.bag_path)
+        # self.play_bag(go_bag=self.bag_path)
 
     def here_run(self) -> None:
         """直接插值到bag最后一帧位置运行"""

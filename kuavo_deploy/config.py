@@ -80,9 +80,15 @@ class ConfigEnv:
         # ensure lists lengths for arm bounds
         if not (len(self.limits["joint_q"]["max"]) == len(self.limits["joint_q"]["min"]) == 14):
             raise ValueError("Robot arm_min/arm_max must be lists of length 14")
-        if self.qiangnao_dof_needed != 1: # not in [1, 7]:
-            raise ValueError("qiangnao_dof_needed must be 1 now!")
-            # raise ValueError("qiangnao_dof_needed must be either 1 or 7")
+        if self.qiangnao_dof_needed not in (1, 6):
+            raise ValueError("qiangnao_dof_needed must be 1 or 6")
+        if self.eef_type == "qiangnao":
+            grip_len = len(self.limits["gripper"]["min"])
+            expected = 2 * self.qiangnao_dof_needed  # 1->2, 6->12
+            if grip_len != expected:
+                raise ValueError(
+                    f"limits.gripper min/max length must be {expected} when qiangnao_dof_needed={self.qiangnao_dof_needed}, got {grip_len}"
+                )
 
     # -------- Derived properties ----------
     @property
@@ -116,6 +122,13 @@ class ConfigEnv:
                 "left": [[0, 1]],
                 "right": [[6, 7]],
                 "both": [[0, 1], [6, 7]]
+            }[self.which_arm]
+        elif self.eef_type == "qiangnao" and self.qiangnao_dof_needed == 6:
+            # 强脑手 6 自由度：左手指 0-5，右手指 6-11
+            return {
+                "left": [[0, 6]],
+                "right": [[6, 12]],
+                "both": [[0, 6], [6, 12]]
             }[self.which_arm]
         else:
             raise ValueError("Unsupported eef_type or dof config")
@@ -175,7 +188,7 @@ class ConfigInference:
     env_name: str = "Kuavo-Sim"
 
     def validate(self):
-        if self.policy_type not in ["diffusion", "act"]:
+        if self.policy_type not in ["diffusion", "act","gr00t_n1d5"]:
             # 若将来支持更多策略，请在此扩展
             raise ValueError(f"Unsupported policy_type '{self.policy_type}'")
         if self.device not in ["cuda", "cpu"]:

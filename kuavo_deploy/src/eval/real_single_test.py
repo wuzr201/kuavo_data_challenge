@@ -93,6 +93,9 @@ def setup_policy(pretrained_path, policy_type, device=torch.device("cuda")):
         policy = CustomDiffusionPolicyWrapper.from_pretrained(Path(pretrained_path),strict=True)
     elif policy_type == 'act':
         policy = CustomACTPolicyWrapper.from_pretrained(Path(pretrained_path),strict=True)
+    elif policy_type == 'gr00t_n1d5':
+        from kuavo_train.wrapper.policy.gr00t_n1d5.Gr00tN1d5PolicyWrapper import CustomGr00tN1d5PolicyWrapper
+        policy = CustomGr00tN1d5PolicyWrapper.from_pretrained(Path(pretrained_path), strict=True)
     elif policy_type == 'client':
         policy = PolicyClient()
     else:

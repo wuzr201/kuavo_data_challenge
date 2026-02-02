@@ -69,9 +69,14 @@ class KuavoBaseRosEnv(gym.Env):
         self.ratio = config_kuavo_env.ratio
         self.frame_alignment = config_kuavo_env.frame_alignment
 
+    def _get_grip_dof(self):
+        """每臂夹爪/灵巧手自由度：qiangnao 用 qiangnao_dof_needed，其余为 1。"""
+        return self.qiangnao_dof_needed if self.eef_type == 'qiangnao' else 1
+
     def _set_observation_space(self):
         limits = self.limits
         obs_low, obs_high = [], []
+        grip_dof = self._get_grip_dof()
 
         # -------- 构建 state 空间（joint_q + gripper） --------
         if 'joint_q' in self.obs_key_map:
@@ -83,14 +88,14 @@ class KuavoBaseRosEnv(gym.Env):
         else:
             grip_min, grip_max = [], []
         if self.which_arm == 'both':
-            obs_low.extend(joint_min[:7]+grip_min[:1]+joint_min[7:14]+grip_min[1:2])
-            obs_high.extend(joint_max[:7]+grip_max[:1]+joint_max[7:14]+grip_max[1:2])
+            obs_low.extend(joint_min[:7] + grip_min[:grip_dof] + joint_min[7:14] + grip_min[grip_dof : 2 * grip_dof])
+            obs_high.extend(joint_max[:7] + grip_max[:grip_dof] + joint_max[7:14] + grip_max[grip_dof : 2 * grip_dof])
         if self.which_arm == 'left':
-            obs_low.extend(joint_min[:7]+grip_min[:1])
-            obs_high.extend(joint_max[:7]+grip_max[:1])
+            obs_low.extend(joint_min[:7] + grip_min[:grip_dof])
+            obs_high.extend(joint_max[:7] + grip_max[:grip_dof])
         if self.which_arm == 'right':
-            obs_low.extend(joint_min[7:14]+grip_min[1:2])
-            obs_high.extend(joint_max[7:14]+grip_max[1:2])
+            obs_low.extend(joint_min[7:14] + grip_min[grip_dof : 2 * grip_dof])
+            obs_high.extend(joint_max[7:14] + grip_max[grip_dof : 2 * grip_dof])
 
         self.obs_low = np.array(obs_low)
         self.obs_high = np.array(obs_high)
@@ -122,6 +127,7 @@ class KuavoBaseRosEnv(gym.Env):
 
     def _set_action_space(self):
         limits = self.limits
+        grip_dof = self._get_grip_dof()
 
         # ===============================
         # 辅助函数：构造单臂动作范围
@@ -131,18 +137,18 @@ class KuavoBaseRosEnv(gym.Env):
             if self.control_mode == 'joint':
                 if arm == 'left':
                     return (
-                        limits['joint_q']['min'][:7] + limits['gripper']['min'][:1],
-                        limits['joint_q']['max'][:7] + limits['gripper']['max'][:1],
+                        limits['joint_q']['min'][:7] + limits['gripper']['min'][:grip_dof],
+                        limits['joint_q']['max'][:7] + limits['gripper']['max'][:grip_dof],
                     )
                 elif arm == 'right':
                     return (
-                        limits['joint_q']['min'][7:14] + limits['gripper']['min'][1:2],
-                        limits['joint_q']['max'][7:14] + limits['gripper']['max'][1:2],
+                        limits['joint_q']['min'][7:14] + limits['gripper']['min'][grip_dof : 2 * grip_dof],
+                        limits['joint_q']['max'][7:14] + limits['gripper']['max'][grip_dof : 2 * grip_dof],
                     )
                 elif arm == 'both':
                     return (
-                        limits['joint_q']['min'][:7] + limits['gripper']['min'][:1]+limits['joint_q']['min'][7:14] + limits['gripper']['min'][1:2],
-                        limits['joint_q']['max'][:7] + limits['gripper']['max'][:1]+limits['joint_q']['max'][7:14] + limits['gripper']['max'][1:2],
+                        limits['joint_q']['min'][:7] + limits['gripper']['min'][:grip_dof] + limits['joint_q']['min'][7:14] + limits['gripper']['min'][grip_dof : 2 * grip_dof],
+                        limits['joint_q']['max'][:7] + limits['gripper']['max'][:grip_dof] + limits['joint_q']['max'][7:14] + limits['gripper']['max'][grip_dof : 2 * grip_dof],
                     )
 
             elif self.control_mode == 'eef':
@@ -151,18 +157,18 @@ class KuavoBaseRosEnv(gym.Env):
                 inf_pad = [-np.inf] * 6
                 inf_pad_pos = [np.inf] * 6
 
-                def eef_block(start, end, grip_idx):
-                    low = limits[key]['min'][start:end] + inf_pad + limits['gripper']['min'][grip_idx:grip_idx + 1]
-                    high = limits[key]['max'][start:end] + inf_pad_pos + limits['gripper']['max'][grip_idx:grip_idx + 1]
+                def eef_block(start, end, grip_start):
+                    low = limits[key]['min'][start:end] + inf_pad + limits['gripper']['min'][grip_start : grip_start + grip_dof]
+                    high = limits[key]['max'][start:end] + inf_pad_pos + limits['gripper']['max'][grip_start : grip_start + grip_dof]
                     return low, high
 
                 if arm == 'left':
                     return eef_block(0, 3, 0)
                 elif arm == 'right':
-                    return eef_block(6, 9, 1)
+                    return eef_block(6, 9, grip_dof)
                 elif arm == 'both':
                     low1, high1 = eef_block(0, 3, 0)
-                    low2, high2 = eef_block(6, 9, 1)
+                    low2, high2 = eef_block(6, 9, grip_dof)
                     return low1 + low2, high1 + high2
 
             raise ValueError(f"Unsupported arm mode: {arm}")
@@ -359,7 +365,8 @@ class KuavoBaseRosEnv(gym.Env):
 
         # === 4. 执行动作 ===
         t2 = time.time()
-        self.cur_joint_angles_action = np.concatenate((action[:7], action[8:15]), axis=0)
+        grip_dof = self._get_grip_dof()
+        self.cur_joint_angles_action = np.concatenate((action[:7], action[7 + grip_dof : 14 + grip_dof]), axis=0)
         self.exec_action(action)
 
         # === 5. 延时与观测 ===
@@ -383,8 +390,7 @@ class KuavoBaseRosEnv(gym.Env):
 
     def exec_action(self, action):
         """执行机械臂与末端执行器动作"""
-        # if not self.only_arm:
-        #     return
+        grip_dof = self._get_grip_dof()
 
         def safe_control_arm(target_position):
             try:
@@ -397,25 +403,29 @@ class KuavoBaseRosEnv(gym.Env):
                 else:
                     raise
 
-
         if self.which_arm == 'both':
-            left_joints, left_eef = action[:7], action[7]
-            right_joints, right_eef = action[8:15], action[15]
+            # action 顺序：左关节(7)、左夹爪、右关节(7)、右夹爪
+            left_joints = action[:7]
+            left_eef = action[7 : 7 + grip_dof]
+            right_joints = action[7 + grip_dof : 14 + grip_dof]
+            right_eef = action[14 + grip_dof : 14 + 2 * grip_dof]
             target_position = np.concatenate((left_joints, right_joints), axis=0)
             safe_control_arm(target_position)
             self._control_eef(left_eef, right_eef)
 
         elif self.which_arm == 'left':
-            left_joints, left_eef = action[:7], action[7]
+            left_joints = action[:7]
+            left_eef = action[7 : 7 + grip_dof]
             target_position = np.concatenate((left_joints, self.arm_init[7:14]), axis=0)
             safe_control_arm(target_position)
-            self._control_eef(left_eef, 0)
+            self._control_eef(left_eef, np.zeros(grip_dof))
 
         elif self.which_arm == 'right':
-            right_joints, right_eef = action[:7], action[7]
+            right_joints = action[:7]
+            right_eef = action[7 : 7 + grip_dof]
             target_position = np.concatenate((self.arm_init[:7], right_joints), axis=0)
             safe_control_arm(target_position)
-            self._control_eef(0, right_eef)
+            self._control_eef(np.zeros(grip_dof), right_eef)
         else:
             raise KeyError(f"Unsupported which_arm: {self.which_arm}")
 
@@ -438,14 +448,20 @@ class KuavoBaseRosEnv(gym.Env):
             self.lejuclaw.control(target_positions=eef_msg.position)
 
         elif self.eef_type == 'qiangnao':
-            if self.qiangnao_dof_needed != 1:
-                raise KeyError("qiangnao_dof_needed != 1 is not supported!")
-
-            tem_left, tem_right = left_eef * 100, right_eef * 100
-            target_positions = np.array([
-                tem_left, 100, *([tem_left] * 4),
-                tem_right, 100, *([tem_right] * 4)
-            ])
+            dof = self.qiangnao_dof_needed
+            left_eef = np.atleast_1d(np.asarray(left_eef, dtype=np.float64))
+            right_eef = np.atleast_1d(np.asarray(right_eef, dtype=np.float64))
+            if left_eef.size == 1 and right_eef.size == 1 and dof == 1:
+                tem_left, tem_right = float(left_eef.flat[0]) * 100, float(right_eef.flat[0]) * 100
+                target_positions = np.array([
+                    tem_left, 100, *([tem_left] * 4),
+                    tem_right, 100, *([tem_right] * 4)
+                ])
+            elif dof == 6 and left_eef.size == 6 and right_eef.size == 6:
+                scale = 100.0 if np.all(left_eef <= 1.1) and np.all(right_eef <= 1.1) else 1.0
+                target_positions = np.concatenate([left_eef * scale, right_eef * scale], axis=0)
+            else:
+                raise KeyError(f"qiangnao_dof_needed={dof} requires left/right eef length {dof}, got {left_eef.size}, {right_eef.size}")
             self.qiangnao.control(target_positions=target_positions)
 
         else:
@@ -500,7 +516,6 @@ class KuavoBaseRosEnv(gym.Env):
             else:
                 raise KeyError(f"Unsupported which_arm: {self.which_arm}")
 
-        # 拼接结果
         obs["observation.state"] = np.concatenate(
             arm_data["left"] + arm_data["right"], axis=0
         )
