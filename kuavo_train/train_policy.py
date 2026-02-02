@@ -23,6 +23,7 @@ from lerobot.utils.random_utils import set_seed
 from lerobot.policies.factory import make_pre_post_processors
 from kuavo_train.wrapper.policy.diffusion.DiffusionPolicyWrapper import CustomDiffusionPolicyWrapper
 from kuavo_train.wrapper.policy.act.ACTPolicyWrapper import CustomACTPolicyWrapper
+from kuavo_train.wrapper.policy.gr00t_n1d5.Gr00tN1d5PolicyWrapper import CustomGr00tN1d5PolicyWrapper
 from kuavo_train.wrapper.dataset.LeRobotDatasetWrapper import CustomLeRobotDataset
 from kuavo_train.utils.augmenter import crop_image, resize_image, DeterministicAugmenterColor
 from kuavo_train.utils.utils import save_rng_state, load_rng_state
@@ -107,6 +108,7 @@ def build_policy(name, policy_cfg):
     policy = {
         "diffusion": CustomDiffusionPolicyWrapper,
         "act": CustomACTPolicyWrapper,
+        "gr00t_n1d5": CustomGr00tN1d5PolicyWrapper,
     }[name](policy_cfg)
     return policy
 
@@ -215,6 +217,17 @@ def main(cfg: DictConfig):
     output_directory.mkdir(parents=True, exist_ok=True)
     writer = SummaryWriter(log_dir=str(output_directory))
 
+    # Initialize external logger (e.g., wandb) similar to accelerate script
+    wandb_run = None
+    if getattr(cfg.training, "log_with", None) is not None:
+        if cfg.training.log_with == "wandb":
+            import wandb
+            wandb_run = wandb.init(
+                project=f"{cfg.task}_{cfg.method}",
+                name=f"run_{cfg.timestamp}",
+                config=OmegaConf.to_container(cfg, resolve=True),
+            )
+
     device = torch.device(cfg.training.device)
 
     # Dataset metadata and features
@@ -235,7 +248,16 @@ def main(cfg: DictConfig):
 
     # Build policy
     policy = build_policy(cfg.policy_name, policy_cfg)
-    preprocessor, postprocessor = make_pre_post_processors(policy_cfg, dataset_stats=dataset_metadata.stats)
+    if policy_cfg.type == "gr00t_n1d5_kuavo":
+        from kuavo_train.wrapper.policy.gr00t_n1d5.processor_groot import make_groot_pre_post_processors
+
+        preprocessor, postprocessor = make_groot_pre_post_processors(
+            config=policy_cfg,
+            dataset_stats=dataset_metadata.stats,
+        )
+    else:
+        preprocessor, postprocessor = make_pre_post_processors(policy_cfg, dataset_stats=dataset_metadata.stats)
+
     preprocessor.save_pretrained(output_directory)
     postprocessor.save_pretrained(output_directory)
     optimizer, lr_scheduler = build_optimizer_and_scheduler(policy, cfg, dataset_metadata.info["total_frames"])
@@ -384,6 +406,17 @@ def main(cfg: DictConfig):
                 writer.add_scalar("train/lr", lr_scheduler.get_last_lr()[0], steps)
                 epoch_bar.set_postfix(loss=f"{scaled_loss.item():.3f}", step=steps, lr=lr_scheduler.get_last_lr()[0])
 
+                # Log to wandb if enabled (keep keys consistent with accelerate script)
+                if wandb_run is not None:
+                    wandb.log(
+                        {
+                            "train/loss": scaled_loss.item(),
+                            "train/lr": lr_scheduler.get_last_lr()[0],
+                            "step": steps,
+                        },
+                        step=steps,
+                    )
+
             steps += 1
             total_loss += scaled_loss.item()
         
@@ -413,7 +446,20 @@ def main(cfg: DictConfig):
         torch.save(checkpoint, output_directory / "learning_state.pth")
         save_rng_state(output_directory / "rng_state.pth")
 
+        # Log epoch-level metrics to wandb (align with accelerate script)
+        if wandb_run is not None:
+            wandb.log(
+                {
+                    "train/total_loss": total_loss,
+                    "train/best_loss": best_loss,
+                    "train/epoch": epoch + 1,
+                },
+                step=steps,
+            )
+
     writer.close()
+    if wandb_run is not None:
+        wandb_run.finish()
 
 
 if __name__ == "__main__":

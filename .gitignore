@@ -217,3 +217,5 @@ ana.py
 *.tar
 error.txt
 obs.png
+
+wandb/

@@ -25,6 +25,7 @@ from lerobot.utils.random_utils import set_seed
 from lerobot.policies.factory import make_pre_post_processors
 from kuavo_train.wrapper.policy.diffusion.DiffusionPolicyWrapper import CustomDiffusionPolicyWrapper
 from kuavo_train.wrapper.policy.act.ACTPolicyWrapper import CustomACTPolicyWrapper
+from kuavo_train.wrapper.policy.gr00t_n1d5.Gr00tN1d5PolicyWrapper import CustomGr00tN1d5PolicyWrapper
 from kuavo_train.wrapper.dataset.LeRobotDatasetWrapper import CustomLeRobotDataset
 from kuavo_train.utils.augmenter import crop_image, resize_image, DeterministicAugmenterColor
 from kuavo_train.utils.utils import save_rng_state, load_rng_state
@@ -110,6 +111,7 @@ def build_policy(name, policy_cfg):
     policy = {
         "diffusion": CustomDiffusionPolicyWrapper,
         "act": CustomACTPolicyWrapper,
+        "gr00t_n1d5": CustomGr00tN1d5PolicyWrapper,
     }[name](policy_cfg)
     return policy
 
@@ -215,8 +217,7 @@ def main(cfg: DictConfig):
     # Initialize Accelerator
     accelerator = accelerate.Accelerator(
         gradient_accumulation_steps=cfg.training.accumulation_steps,
-        log_with=None,                        # Disable logging
-        # log_with="tensorboard",             # Disable logging
+        log_with=cfg.training.log_with,                        # Disable logging
         device_placement=True,                # Explicitly enable device placement
         step_scheduler_with_optimizer=False,  # A fix to the stepping logic as accelerate might make this thread-unsafe.
         mixed_precision="fp16" if cfg.policy.get("use_amp", False) else "no",
@@ -228,6 +229,18 @@ def main(cfg: DictConfig):
 
     # set_seed(cfg.training.seed)
     accelerate.utils.set_seed(cfg.training.seed)
+
+    if cfg.training.get("log_with") is not None:
+        tracker_init_kwargs = {}
+        if cfg.training.log_with == "wandb":
+            tracker_init_kwargs["wandb"] = {
+                "name": f"run_{cfg.timestamp}",
+            }
+        accelerator.init_trackers(
+            project_name=f"kdc_{cfg.task}_{cfg.method}",
+            config=OmegaConf.to_container(cfg, resolve=True),
+            init_kwargs=tracker_init_kwargs if tracker_init_kwargs else None,
+        )
 
     # mkdir and output TensorBoard only in the main process
     output_directory = None
@@ -247,7 +260,19 @@ def main(cfg: DictConfig):
     # Build policy
     policy = build_policy(cfg.policy_name, policy_cfg)
     accelerator.wait_for_everyone()
-    preprocessor, postprocessor = make_pre_post_processors(policy_cfg, dataset_stats=dataset_metadata.stats)
+
+    if policy_cfg.type == "gr00t_n1d5_kuavo":
+        from kuavo_train.wrapper.policy.gr00t_n1d5.processor_groot import make_groot_pre_post_processors
+
+        preprocessor, postprocessor = make_groot_pre_post_processors(
+            config=policy_cfg,
+            dataset_stats=dataset_metadata.stats,
+        )
+    else:
+        preprocessor, postprocessor = make_pre_post_processors(policy_cfg, dataset_stats=dataset_metadata.stats)
+
+    # preprocessor, postprocessor = make_pre_post_processors(policy_cfg, dataset_stats=dataset_metadata.stats)
+
     if accelerator.is_main_process:
         preprocessor.save_pretrained(output_directory)
         postprocessor.save_pretrained(output_directory)
@@ -368,7 +393,19 @@ def main(cfg: DictConfig):
                     batch_count += 1
                     total_loss += accelerator.gather(loss).mean().item()
 
+                # Log to wandb/tensorboard via accelerator
+                accelerator.log(
+                    {"train/loss": loss.item(), "train/lr": lr_scheduler.get_last_lr()[0], "step": steps},
+                    step=steps
+                )
+
         total_loss = total_loss / batch_count if batch_count > 0 else total_loss
+
+        # Log to wandb/tensorboard via accelerator
+        accelerator.log(
+            {"train/total_loss": total_loss, "train/best_loss": best_loss, "train/epoch": epoch + 1},
+            step=steps  # Use global step for proper tracking
+        )
         
         # Log, save, and eval flags
         accelerator.wait_for_everyone()
