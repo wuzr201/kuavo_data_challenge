@@ -123,6 +123,8 @@ class ObsBuffer:
         resize_wh = handle.get("params", {}).get("resize_wh", None)
         if resize_wh:
             cv_img = cv2.resize(cv_img, resize_wh)
+        if key == "head_cam_h":
+            cv_img = cv2.rotate(cv_img, cv2.ROTATE_180)
         data = self.img_preprocess(cv_img)
         self._append_data(key, data, msg.header.stamp.to_sec())
 
